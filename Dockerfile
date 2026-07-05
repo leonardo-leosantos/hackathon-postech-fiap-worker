@@ -35,6 +35,11 @@ FROM node:20-alpine AS production
 
 WORKDIR /usr/src/app
 
+# FFmpeg é dependência de runtime: o adapter de extração de frames invoca o
+# binário de sistema `ffmpeg` (via fluent-ffmpeg), portanto ele precisa existir
+# na imagem de produção.
+RUN apk add --no-cache ffmpeg
+
 # Criar usuário não-root para segurança
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nestjs -u 1001

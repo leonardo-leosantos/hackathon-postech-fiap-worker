@@ -21,6 +21,86 @@
   <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
   [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
 
+## Video Worker
+
+Serviço worker (consumidor de SQS) que processa vídeos de forma assíncrona.
+Não expõe API de negócio — o único endpoint HTTP é `/health` (liveness/readiness
+para o orquestrador). O trabalho real é dirigido por mensagens da fila SQS.
+
+### Pipeline (A → F)
+
+Para cada mensagem recebida, o `ProcessVideoUseCase` executa:
+
+- **A. Download** — baixa o vídeo do S3 (`s3VideoKey`) para o workspace temporário local.
+- **B. Extração de frames** — FFmpeg extrai 1 frame por segundo (`frame-%04d.jpg`).
+- **C. Compactação** — os frames são zipados em um único `.zip`.
+- **D. Upload** — o `.zip` é enviado ao S3 em `zips/<userId>/<videoId>.zip`.
+- **E. Notificação** — a Core API recebe `PATCH /internal/videos/<videoId>/status`
+  com `{ status: 'DONE', s3ZipKey }`.
+- **F. Cleanup** — o workspace temporário é sempre removido (roda no `finally`).
+
+### Payload da mensagem SQS
+
+O corpo (`Body`) da mensagem é um JSON com o contrato:
+
+```json
+{
+  "videoId": "abc-123",
+  "userId": "user-42",
+  "s3VideoKey": "uploads/user-42/abc-123.mp4"
+}
+```
+
+Os três campos são obrigatórios e não podem ser vazios.
+
+### Semântica de erro / DLQ
+
+O que decide se a mensagem é apagada da fila é o resultado do use-case:
+
+- **Sucesso** (`DONE`) → a mensagem é apagada do SQS.
+- **Erro de NEGÓCIO** (`MediaProcessingException`, ex.: vídeo corrompido/não
+  suportado) → o worker notifica a Core API com `{ status: 'ERROR' }`, o
+  use-case RESOLVE e a mensagem é apagada (reprocessar daria o mesmo erro).
+- **Erro de INFRA** (`ExternalServiceException`: falha de rede/S3/API) → o
+  use-case LANÇA, a mensagem NÃO é apagada; o SQS reentrega após o visibility
+  timeout e encaminha para a DLQ após as tentativas configuradas.
+- **Poison message** (JSON inválido ou fora do contrato) → também não é apagada;
+  segue o mesmo caminho de reentrega/DLQ.
+
+### Variáveis de ambiente
+
+Copie `.env.example` para `.env` e preencha:
+
+| Variável | Descrição |
+| --- | --- |
+| `NODE_ENV` | `development` \| `test` \| `production` |
+| `PORT` | Porta do endpoint `/health` (default 3001) |
+| `AWS_REGION` | Região AWS |
+| `AWS_ACCESS_KEY_ID` | Credencial AWS |
+| `AWS_SECRET_ACCESS_KEY` | Credencial AWS |
+| `SQS_QUEUE_URL` | URL da fila SQS de entrada |
+| `S3_BUCKET_NAME` | Bucket S3 (origem dos vídeos e destino dos zips) |
+| `API_URL` | Base URL da Core API |
+| `DD_API_KEY` | API key do Datadog (usada pelo docker-compose) |
+
+As variáveis são validadas no boot (fail-fast) via `zod`.
+
+### Como rodar
+
+```bash
+# desenvolvimento (watch)
+$ npm run start:dev
+
+# produção (build + node)
+$ npm run build && npm run start:prod
+
+# docker (worker + datadog-agent)
+$ docker compose up app datadog-agent
+```
+
+> A imagem Docker de produção instala o `ffmpeg` (dependência de runtime da
+> etapa de extração de frames).
+
 ## Description
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.

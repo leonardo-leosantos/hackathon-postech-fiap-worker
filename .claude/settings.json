@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -f /tmp/worker-smoke.log)",
+      "Bash(AWS_REGION=us-east-1 AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=x SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/000/q S3_BUCKET_NAME=b API_URL=http://localhost:9999 PORT=3999 node dist/main)",
+      "Bash(echo \"PID=$!\")",
+      "Read(//tmp/**)",
+      "Read(//private/tmp/**)",
+      "Bash(echo \"LINT_EXIT=$?\")",
+      "Bash(echo \"src lint: 0 problems \\(exit $?\\)\")",
+      "Bash(node -e \"console.log\\('archiver', require\\('./node_modules/archiver/package.json'\\).version\\)\")"
+    ]
+  }
+}
