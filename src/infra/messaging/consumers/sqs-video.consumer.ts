@@ -56,6 +56,8 @@ export class SqsVideoConsumer
         accessKeyId: this.config.awsAccessKeyId,
         secretAccessKey: this.config.awsSecretAccessKey,
       },
+      // LocalStack: honra endpoint customizado quando fornecido.
+      ...(this.config.awsEndpoint ? { endpoint: this.config.awsEndpoint } : {}),
     });
   }
 

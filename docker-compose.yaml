@@ -14,12 +14,16 @@ services:
       - NODE_OPTIONS=--require dd-trace/init
       - PORT=${PORT:-3001}
       # AWS / SQS / S3 / Core API — repassados do .env para o container.
+      # Dentro da rede compartilhada os hosts são "localstack" (AWS emulado) e
+      # "hackathon-postech-fiap-core-app" (core); estes valores sobrescrevem o .env.
       - AWS_REGION=${AWS_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - SQS_QUEUE_URL=${SQS_QUEUE_URL}
+      - AWS_ENDPOINT=http://localstack:4566
+      - SQS_QUEUE_URL=http://localstack:4566/000000000000/video-processing
       - S3_BUCKET_NAME=${S3_BUCKET_NAME}
-      - API_URL=${API_URL}
+      - API_URL=http://hackathon-postech-fiap-core-app:3000
+      - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN}
       - DD_ENV=production
       - DD_SERVICE=hackathon-postech-fiap-worker
       - DD_VERSION=1.0.0
@@ -35,6 +39,7 @@ services:
       com.datadoghq.tags.version: '1.0.0'
     networks:
       - worker-network
+      - core-network
     restart: unless-stopped
 
   # Coleta métricas do host e dos containers e recebe traces APM (DD_APM_NON_LOCAL_TRAFFIC permite outros containers na rede enviarem traces).
@@ -113,6 +118,11 @@ services:
 networks:
   worker-network:
     driver: bridge
+  # Rede externa do core — o compose do core precisa estar de pé ANTES do worker,
+  # caso contrário o docker retorna "network not found".
+  core-network:
+    external: true
+    name: hackathon-postech-fiap-core_postgres
 
 volumes:
   sonarqube_data:
