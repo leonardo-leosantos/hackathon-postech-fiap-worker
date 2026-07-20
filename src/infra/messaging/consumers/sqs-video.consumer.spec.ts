@@ -17,13 +17,15 @@ const sqsMock = mockClient(SQSClient);
 /** Backoff aplicado pelo consumer quando o próprio `receive` falha (ms). */
 const BACKOFF_MS = 5_000;
 
-const config = {
+const configProps = {
   sqsQueueUrl: 'http://localhost:4566/000000000000/video-processing',
   awsRegion: 'us-east-1',
   awsAccessKeyId: 'test',
   awsSecretAccessKey: 'test',
   awsEndpoint: undefined,
-} as unknown as AppConfigService;
+};
+
+const config = configProps as unknown as AppConfigService;
 
 /**
  * Corpo no CONTRATO DO CORE (`videoUid`/`userUid`/`blobStorageVideoKey`).
@@ -180,6 +182,32 @@ describe('SqsVideoConsumer', () => {
     });
   });
 
+  describe('constructor — LocalStack endpoint', () => {
+    it('honra awsEndpoint (LocalStack) com endpoint customizado no client', async () => {
+      const withEndpoint = new SqsVideoConsumer(
+        useCase as unknown as ProcessVideoUseCase,
+        {
+          ...configProps,
+          awsEndpoint: 'http://localhost:4566',
+        } as unknown as AppConfigService,
+        logger,
+      );
+
+      const endpointProvider = withEndpoint['client'].config.endpoint;
+      expect(endpointProvider).toBeDefined();
+      await expect(endpointProvider!()).resolves.toMatchObject({
+        hostname: 'localhost',
+        port: 4566,
+        protocol: 'http:',
+      });
+    });
+
+    it('usa o endpoint padrão da AWS quando awsEndpoint está ausente', () => {
+      // `consumer` do beforeEach já é construído com awsEndpoint: undefined.
+      expect(consumer['client'].config.endpoint).toBeUndefined();
+    });
+  });
+
   describe('polling lifecycle', () => {
     it('7) happy loop: bootstrap -> receive 1 -> process -> delete -> destroy (loop exits)', async () => {
       let receiveCount = 0;
@@ -216,6 +244,25 @@ describe('SqsVideoConsumer', () => {
         WaitTimeSeconds: 20,
         VisibilityTimeout: 300,
       });
+    });
+
+    it('trata resposta sem Messages como lote vazio (fallback ?? [])', async () => {
+      let receiveCount = 0;
+      sqsMock.on(ReceiveMessageCommand).callsFake(() => {
+        receiveCount += 1;
+        if (receiveCount === 1) {
+          return {}; // sem a propriedade Messages — cai no ?? []
+        }
+        consumer.onModuleDestroy();
+        return { Messages: [] };
+      });
+
+      consumer.onApplicationBootstrap();
+      await consumer['pollingLoop'];
+
+      expect(useCase.execute).not.toHaveBeenCalled();
+      expect(sqsMock.commandCalls(DeleteMessageCommand)).toHaveLength(0);
+      expect(receiveCount).toBeGreaterThanOrEqual(2); // o loop não caiu
     });
 
     describe('with fake timers', () => {
