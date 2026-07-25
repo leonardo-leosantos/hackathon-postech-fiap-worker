@@ -12,6 +12,10 @@ export const envSchema = z.object({
   SQS_QUEUE_URL: z.string().url('SQS_QUEUE_URL must be a valid URL'),
   S3_BUCKET_NAME: z.string().min(1, 'S3_BUCKET_NAME is required'),
   API_URL: z.string().url('API_URL must be a valid URL'),
+  // Endpoint AWS customizado (ex.: LocalStack). Ausente em produção (AWS real).
+  AWS_ENDPOINT: z.string().url('AWS_ENDPOINT must be a valid URL').optional(),
+  // Token do header x-internal-token exigido pelas rotas internal/* da Core API.
+  INTERNAL_API_TOKEN: z.string().min(1, 'INTERNAL_API_TOKEN is required'),
   PORT: z.coerce.number().int().positive().default(3001),
   NODE_ENV: z
     .enum(['development', 'test', 'production'])

@@ -1,11 +1,11 @@
 import { parseSqsVideoMessage } from './dtos/sqs-video-message.schema';
 
 describe('parseSqsVideoMessage', () => {
-  it('returns the command for a valid JSON payload', () => {
+  it('translates the core contract into the internal command', () => {
     const raw = JSON.stringify({
-      videoId: 'video-1',
-      userId: 'user-1',
-      s3VideoKey: 'uploads/user-1/video-1.mp4',
+      videoUid: 'video-1',
+      userUid: 'user-1',
+      blobStorageVideoKey: 'uploads/user-1/video-1.mp4',
     });
 
     expect(parseSqsVideoMessage(raw)).toEqual({
@@ -20,16 +20,16 @@ describe('parseSqsVideoMessage', () => {
   });
 
   it('throws when a required field is missing', () => {
-    const raw = JSON.stringify({ videoId: 'video-1', userId: 'user-1' });
+    const raw = JSON.stringify({ videoUid: 'video-1', userUid: 'user-1' });
 
     expect(() => parseSqsVideoMessage(raw)).toThrow();
   });
 
   it('throws when a required field is empty', () => {
     const raw = JSON.stringify({
-      videoId: 'video-1',
-      userId: '',
-      s3VideoKey: 'uploads/user-1/video-1.mp4',
+      videoUid: 'video-1',
+      userUid: '',
+      blobStorageVideoKey: 'uploads/user-1/video-1.mp4',
     });
 
     expect(() => parseSqsVideoMessage(raw)).toThrow();

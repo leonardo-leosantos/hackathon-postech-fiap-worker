@@ -36,22 +36,25 @@ Para cada mensagem recebida, o `ProcessVideoUseCase` executa:
 - **C. Compactação** — os frames são zipados em um único `.zip`.
 - **D. Upload** — o `.zip` é enviado ao S3 em `zips/<userId>/<videoId>.zip`.
 - **E. Notificação** — a Core API recebe `PATCH /internal/videos/<videoId>/status`
-  com `{ status: 'DONE', s3ZipKey }`.
+  com `{ status: 'DONE', blobStorageZipKey }` e o header `x-internal-token`
+  (`INTERNAL_API_TOKEN`). Internamente o domínio usa `s3ZipKey`; o adapter HTTP
+  traduz para `blobStorageZipKey` (vocabulário do core).
 - **F. Cleanup** — o workspace temporário é sempre removido (roda no `finally`).
 
 ### Payload da mensagem SQS
 
-O corpo (`Body`) da mensagem é um JSON com o contrato:
+O corpo (`Body`) da mensagem é um JSON no contrato publicado pelo core:
 
 ```json
 {
-  "videoId": "abc-123",
-  "userId": "user-42",
-  "s3VideoKey": "uploads/user-42/abc-123.mp4"
+  "videoUid": "abc-123",
+  "userUid": "user-42",
+  "blobStorageVideoKey": "uploads/user-42/abc-123.mp4"
 }
 ```
 
-Os três campos são obrigatórios e não podem ser vazios.
+Os três campos são obrigatórios e não podem ser vazios. O `parseSqsVideoMessage`
+valida esse contrato e traduz para o command interno (`videoId`/`userId`/`s3VideoKey`).
 
 ### Semântica de erro / DLQ
 
@@ -78,12 +81,23 @@ Copie `.env.example` para `.env` e preencha:
 | `AWS_REGION` | Região AWS |
 | `AWS_ACCESS_KEY_ID` | Credencial AWS |
 | `AWS_SECRET_ACCESS_KEY` | Credencial AWS |
+| `AWS_ENDPOINT` | _(opcional)_ Endpoint AWS customizado, ex.: LocalStack (`http://localhost:4566`). Ausente em produção → SDK usa a AWS real. Quando setado, o cliente S3 usa `forcePathStyle`. |
 | `SQS_QUEUE_URL` | URL da fila SQS de entrada |
 | `S3_BUCKET_NAME` | Bucket S3 (origem dos vídeos e destino dos zips) |
 | `API_URL` | Base URL da Core API |
+| `INTERNAL_API_TOKEN` | Token enviado no header `x-internal-token` às rotas `internal/*` da Core API. Deve ser idêntico ao do core. |
 | `DD_API_KEY` | API key do Datadog (usada pelo docker-compose) |
 
 As variáveis são validadas no boot (fail-fast) via `zod`.
+
+### Integração local com LocalStack + core
+
+Para o ciclo completo local (upload → fila → processamento → zip no S3 → PATCH de
+status), o worker aponta para a infra LocalStack provisionada pelo projeto
+`hackathon-postech-fiap-core` via rede Docker externa compartilhada. Suba o compose do
+**core primeiro** (`postgres`, `redis`, `localstack`, `app`) e depois o worker
+(`docker compose up app datadog-agent`). Detalhes e roteiro de validação ponta a ponta
+em [`prompts/integracao-localstack-core.md`](prompts/integracao-localstack-core.md).
 
 ### Como rodar
 

@@ -44,7 +44,16 @@ export class HttpCoreApiAdapter implements CoreApiPort {
     );
 
     try {
-      await axios.patch(url, payload, { timeout: 10000 });
+      // Traduz o vocabulário do domínio para o DTO do core
+      // (s3ZipKey -> blobStorageZipKey) e envia o header interno de autenticação.
+      const body = {
+        status: payload.status,
+        ...(payload.s3ZipKey ? { blobStorageZipKey: payload.s3ZipKey } : {}),
+      };
+      await axios.patch(url, body, {
+        timeout: 10000,
+        headers: { 'x-internal-token': this.config.internalApiToken },
+      });
       this.logger.log(
         `Core API notified of video status update ${JSON.stringify({
           videoId,

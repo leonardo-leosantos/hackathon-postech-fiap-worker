@@ -34,6 +34,11 @@ export class S3VideoStorageAdapter implements VideoStoragePort {
         accessKeyId: this.config.awsAccessKeyId,
         secretAccessKey: this.config.awsSecretAccessKey,
       },
+      // LocalStack: honra endpoint customizado. forcePathStyle evita que o SDK
+      // tente resolver `<bucket>.<host>` (subdomínio) — necessário fora da AWS real.
+      ...(this.config.awsEndpoint
+        ? { endpoint: this.config.awsEndpoint, forcePathStyle: true }
+        : {}),
     });
     this.bucket = this.config.s3BucketName;
   }

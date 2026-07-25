@@ -35,6 +35,14 @@ export class AppConfigService {
     return this.configService.get('API_URL', { infer: true });
   }
 
+  get awsEndpoint(): string | undefined {
+    return this.configService.get('AWS_ENDPOINT', { infer: true });
+  }
+
+  get internalApiToken(): string {
+    return this.configService.get('INTERNAL_API_TOKEN', { infer: true });
+  }
+
   get port(): number {
     return this.configService.get('PORT', { infer: true });
   }
