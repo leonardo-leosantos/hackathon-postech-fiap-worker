@@ -30,6 +30,8 @@ describe('ProcessVideoUseCase', () => {
   let coreApi: jest.Mocked<CoreApiPort>;
   let tempWorkspace: jest.Mocked<TempWorkspacePort>;
   let logger: jest.Mocked<LoggerPort>;
+  let durationHistogram: jest.Mocked<{ observe: jest.Mock }>;
+  let totalCounter: jest.Mocked<{ inc: jest.Mock }>;
   let useCase: ProcessVideoUseCase;
 
   beforeEach(() => {
@@ -56,6 +58,12 @@ describe('ProcessVideoUseCase', () => {
       warn: jest.fn(),
       debug: jest.fn(),
     };
+    durationHistogram = {
+      observe: jest.fn(),
+    };
+    totalCounter = {
+      inc: jest.fn(),
+    };
 
     useCase = new ProcessVideoUseCase(
       storage,
@@ -64,6 +72,8 @@ describe('ProcessVideoUseCase', () => {
       coreApi,
       tempWorkspace,
       logger,
+      durationHistogram as any,
+      totalCounter as any,
     );
   });
 
