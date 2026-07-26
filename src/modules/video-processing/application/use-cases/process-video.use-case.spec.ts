@@ -10,6 +10,7 @@ import type { FrameArchiverPort } from 'src/modules/video-processing/domain/port
 import type { CoreApiPort } from 'src/modules/video-processing/domain/ports/core-api.port';
 import type { TempWorkspacePort } from 'src/modules/video-processing/domain/ports/temp-workspace.port';
 import type { LoggerPort } from 'src/modules/shared/ports/LoggerPort';
+import { VideoErrorCode } from 'src/modules/video-processing/domain/value-objects/video-status.vo';
 
 describe('ProcessVideoUseCase', () => {
   const command: ProcessVideoCommand = {
@@ -93,18 +94,67 @@ describe('ProcessVideoUseCase', () => {
     expect(tempWorkspace.cleanup).toHaveBeenCalledWith(workspace);
   });
 
-  it('(b) business error: marks ERROR, resolves (no throw) and cleans up', async () => {
+  it('(b) business error: marks ERROR with errorCode/errorReason, resolves (no throw) and cleans up', async () => {
     frameExtractor.extractFrames.mockRejectedValue(
-      new MediaProcessingException('corrupt video'),
+      new MediaProcessingException(
+        'corrupt video',
+        VideoErrorCode.CORRUPT_VIDEO,
+      ),
     );
 
     await expect(useCase.execute(command)).resolves.toBeUndefined();
 
     expect(coreApi.updateVideoStatus).toHaveBeenCalledWith(command.videoId, {
       status: 'ERROR',
+      errorCode: VideoErrorCode.CORRUPT_VIDEO,
+      errorReason: 'corrupt video',
     });
     expect(coreApi.updateVideoStatus).toHaveBeenCalledTimes(1);
     expect(storage.upload).not.toHaveBeenCalled();
+    expect(tempWorkspace.cleanup).toHaveBeenCalledWith(workspace);
+  });
+
+  it('(b2) business error do download (SOURCE_NOT_FOUND): resolve e repassa o código', async () => {
+    storage.download.mockRejectedValue(
+      new MediaProcessingException(
+        'Video object not found in S3',
+        VideoErrorCode.SOURCE_NOT_FOUND,
+      ),
+    );
+
+    await expect(useCase.execute(command)).resolves.toBeUndefined();
+
+    expect(coreApi.updateVideoStatus).toHaveBeenCalledWith(command.videoId, {
+      status: 'ERROR',
+      errorCode: VideoErrorCode.SOURCE_NOT_FOUND,
+      errorReason: 'Video object not found in S3',
+    });
+    expect(frameExtractor.extractFrames).not.toHaveBeenCalled();
+    expect(tempWorkspace.cleanup).toHaveBeenCalledWith(workspace);
+  });
+
+  it('(b3) erro de INFRA no ffmpeg (binário ausente): relança e NÃO notifica o core', async () => {
+    const infraError = new ExternalServiceException('FFmpeg could not run');
+    frameExtractor.extractFrames.mockRejectedValue(infraError);
+
+    await expect(useCase.execute(command)).rejects.toBe(infraError);
+
+    expect(coreApi.updateVideoStatus).not.toHaveBeenCalled();
+    expect(tempWorkspace.cleanup).toHaveBeenCalledWith(workspace);
+  });
+
+  it('(b4) se o PATCH de ERROR falhar (infra), relança para preservar a mensagem', async () => {
+    frameExtractor.extractFrames.mockRejectedValue(
+      new MediaProcessingException(
+        'corrupt video',
+        VideoErrorCode.CORRUPT_VIDEO,
+      ),
+    );
+    const patchFailure = new ExternalServiceException('core api 400');
+    coreApi.updateVideoStatus.mockRejectedValue(patchFailure);
+
+    await expect(useCase.execute(command)).rejects.toBe(patchFailure);
+
     expect(tempWorkspace.cleanup).toHaveBeenCalledWith(workspace);
   });
 

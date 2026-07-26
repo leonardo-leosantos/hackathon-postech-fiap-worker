@@ -17,6 +17,7 @@ lerna-debug.log*
 
 # Tests
 /coverage
+/coverage-e2e
 /.nyc_output
 
 # IDEs and editors
@@ -37,6 +38,8 @@ lerna-debug.log*
 
 # IA - Dev Code
 /prompts
+.claude/*
+
 
 # dotenv environment variable files
 .env

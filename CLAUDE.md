@@ -23,7 +23,7 @@ npm run test:watch
 npm run test:cov
 npm run test:e2e             # jest with test/jest-e2e.json
 
-docker compose up app datadog-agent   # worker + datadog agent
+docker compose up app   # worker
 ```
 
 Env vars are validated with zod at boot (fail-fast). Copy `.env.example` to `.env`.
@@ -64,20 +64,32 @@ the wire and translates in the adapters (hexagonal). The SQS message body uses t
 core's field names `{ videoUid, userUid, blobStorageVideoKey }`; `parseSqsVideoMessage`
 (`src/adapters/messaging/dtos/sqs-video-message.schema.ts`) validates that shape and
 maps it to the internal `ProcessVideoCommand` (`{ videoId, userId, s3VideoKey }`). The
-status PATCH sends `{ status, blobStorageZipKey? }` (the adapter maps the domain's
-`s3ZipKey` → `blobStorageZipKey`) plus the `x-internal-token` header. The domain port
-`CoreApiPort` and `ProcessVideoCommand` keep the internal names — only the adapters translate.
+status PATCH sends `{ status, blobStorageZipKey?, errorCode?, errorReason? }` (the adapter
+maps the domain's `s3ZipKey` → `blobStorageZipKey` and truncates `errorReason` at 1000
+chars) plus the `x-internal-token` header. The domain port `CoreApiPort` and
+`ProcessVideoCommand` keep the internal names — only the adapters translate.
+
+**Mirrored-from-core, no shared lib** (change one side and you must change the other):
+`VideoErrorCode` (`.../domain/value-objects/video-status.vo.ts`) and the zip key
+convention `zips/<userId>/<videoId>.zip` (`.../domain/value-objects/zip-storage-key.ts`,
+which the core's DLQ consumer probes to avoid false "failed" emails). Both have
+drift-locking specs — if one fails, ask whether the core changed, don't just update the
+expectation.
 
 ### Error semantics — this is the core design invariant
 
 Whether an SQS message is deleted is decided entirely by whether `execute()` resolves or throws:
 
-- **Success** or **business error** (`MediaProcessingException` — corrupt/unsupported
-  video, will never succeed on retry) → `execute()` **resolves**; on business error it
-  first notifies Core with `{ status: 'ERROR' }`. The consumer **deletes** the message.
-- **Infra error** (`ExternalServiceException` — network/S3/API failure) → `execute()`
-  **throws**; the consumer does **not** delete → SQS redelivers after visibility timeout,
-  then DLQ after configured retries.
+- **Success** or **business error** (`MediaProcessingException` — bad input, will never
+  succeed on retry) → `execute()` **resolves**; on business error it first notifies Core
+  with `{ status: 'ERROR', errorCode, errorReason }`. The consumer **deletes** the message.
+  Business covers `CORRUPT_VIDEO` (ffmpeg decode failure), `UNSUPPORTED_FORMAT` (ffmpeg
+  produced 0 frames) and `SOURCE_NOT_FOUND` (`NoSuchKey`/`NotFound`/404 on download).
+- **Infra error** (`ExternalServiceException` — network/S3/API failure, plus *our* ffmpeg
+  failures: missing binary, `ENOSPC`) → `execute()` **throws**; the consumer does **not**
+  delete → SQS redelivers after visibility timeout, then DLQ after configured retries. The
+  core assigns `INTERNAL_ERROR` from the DLQ — a platform fault never tells the user their
+  file is broken.
 - **Poison message** (invalid JSON / fails `sqsVideoMessageSchema`) → `parseSqsVideoMessage`
   throws in the consumer → not deleted → same redelivery/DLQ path.
 
