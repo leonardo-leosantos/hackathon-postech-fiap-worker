@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/unbound-method -- asserting on jest mock method references is safe; they are never invoked with a rebound `this`. */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { ProcessVideoUseCase } from './process-video.use-case';
 import { ProcessVideoCommand } from 'src/modules/video-processing/application/dtos/process-video.command';
 import { MediaProcessingException } from 'src/modules/video-processing/domain/exceptions/media-processing.exception';
@@ -31,6 +32,8 @@ describe('ProcessVideoUseCase', () => {
   let coreApi: jest.Mocked<CoreApiPort>;
   let tempWorkspace: jest.Mocked<TempWorkspacePort>;
   let logger: jest.Mocked<LoggerPort>;
+  let durationHistogram: jest.Mocked<{ observe: jest.Mock }>;
+  let totalCounter: jest.Mocked<{ inc: jest.Mock }>;
   let useCase: ProcessVideoUseCase;
 
   beforeEach(() => {
@@ -57,6 +60,12 @@ describe('ProcessVideoUseCase', () => {
       warn: jest.fn(),
       debug: jest.fn(),
     };
+    durationHistogram = {
+      observe: jest.fn(),
+    };
+    totalCounter = {
+      inc: jest.fn(),
+    };
 
     useCase = new ProcessVideoUseCase(
       storage,
@@ -65,6 +74,8 @@ describe('ProcessVideoUseCase', () => {
       coreApi,
       tempWorkspace,
       logger,
+      durationHistogram as any,
+      totalCounter as any,
     );
   });
 

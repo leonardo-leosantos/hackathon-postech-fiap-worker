@@ -1,4 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { InjectMetric } from '@willsoto/nestjs-prometheus';
+import { Counter, Histogram } from 'prom-client';
+import {
+  METRIC_VIDEO_PROCESSING_DURATION,
+  METRIC_VIDEO_PROCESSING_TOTAL,
+} from 'src/infra/http/modules/metrics/metrics.module';
 import { LOGGER } from 'src/modules/shared/ports/logger.token';
 import type { LoggerPort } from 'src/modules/shared/ports/LoggerPort';
 import { ProcessVideoCommand } from 'src/modules/video-processing/application/dtos/process-video.command';
@@ -30,6 +36,10 @@ export class ProcessVideoUseCase {
     @Inject(TEMP_WORKSPACE)
     private readonly tempWorkspace: TempWorkspacePort,
     @Inject(LOGGER) private readonly logger: LoggerPort,
+    @InjectMetric(METRIC_VIDEO_PROCESSING_DURATION)
+    private readonly durationHistogram: Histogram<string>,
+    @InjectMetric(METRIC_VIDEO_PROCESSING_TOTAL)
+    private readonly totalCounter: Counter<string>,
   ) {}
 
   /**
@@ -54,18 +64,66 @@ export class ProcessVideoUseCase {
   async execute(command: ProcessVideoCommand): Promise<void> {
     const { videoId, userId, s3VideoKey } = command;
     this.logger.log('Starting video processing job', { videoId, userId });
+    const totalStart = process.hrtime();
     const ws = await this.tempWorkspace.create(videoId);
     try {
-      await this.storage.download(s3VideoKey, ws.videoPath); // A (infra propagates; SOURCE_NOT_FOUND = business)
-      await this.frameExtractor.extractFrames(ws.videoPath, ws.framesDir); // B (MediaProcessingException = business)
-      await this.archiver.archiveDirectory(ws.framesDir, ws.zipPath); // C
+      // Step: download
+      let stepStart = process.hrtime();
+      try {
+        await this.storage.download(s3VideoKey, ws.videoPath); // A (infra propagates; SOURCE_NOT_FOUND = business)
+        this.recordStepDuration(stepStart, 'download', 'success');
+      } catch (err) {
+        this.recordStepDuration(stepStart, 'download', 'failed');
+        throw err;
+      }
+
+      // Step: extract_frames
+      stepStart = process.hrtime();
+      try {
+        await this.frameExtractor.extractFrames(ws.videoPath, ws.framesDir); // B (MediaProcessingException = business)
+        this.recordStepDuration(stepStart, 'extract_frames', 'success');
+      } catch (err) {
+        this.recordStepDuration(stepStart, 'extract_frames', 'failed');
+        throw err;
+      }
+
+      // Step: zip
+      stepStart = process.hrtime();
+      try {
+        await this.archiver.archiveDirectory(ws.framesDir, ws.zipPath); // C
+        this.recordStepDuration(stepStart, 'zip', 'success');
+      } catch (err) {
+        this.recordStepDuration(stepStart, 'zip', 'failed');
+        throw err;
+      }
+
+      // Step: upload
+      stepStart = process.hrtime();
       const zipKey = buildZipStorageKey(userId, videoId);
-      await this.storage.upload(ws.zipPath, zipKey); // D (infra)
-      await this.coreApi.updateVideoStatus(videoId, {
-        status: 'DONE',
-        s3ZipKey: zipKey,
-      }); // E (infra)
+      try {
+        await this.storage.upload(ws.zipPath, zipKey); // D (infra)
+        this.recordStepDuration(stepStart, 'upload', 'success');
+      } catch (err) {
+        this.recordStepDuration(stepStart, 'upload', 'failed');
+        throw err;
+      }
+
+      // Step: notify_core
+      stepStart = process.hrtime();
+      try {
+        await this.coreApi.updateVideoStatus(videoId, {
+          status: 'DONE',
+          s3ZipKey: zipKey,
+        }); // E (infra)
+        this.recordStepDuration(stepStart, 'notify_core', 'success');
+      } catch (err) {
+        this.recordStepDuration(stepStart, 'notify_core', 'failed');
+        throw err;
+      }
+
       this.logger.log('Video processing job completed', { videoId, zipKey });
+      this.recordStepDuration(totalStart, 'total', 'success');
+      this.totalCounter.inc({ status: 'success' });
     } catch (err) {
       if (err instanceof MediaProcessingException) {
         // BUSINESS error: tell Core it failed, then RESOLVE so the caller deletes the SQS message.
@@ -76,11 +134,21 @@ export class ProcessVideoUseCase {
         );
         // `errorCode` diz ao core qual mensagem de email enviar; `errorReason` é
         // só detalhe técnico (log/auditoria), nunca é mostrado ao usuário.
-        await this.coreApi.updateVideoStatus(videoId, {
-          status: 'ERROR',
-          errorCode: err.code,
-          errorReason: err.message,
-        }); // if THIS fails (infra) it rethrows -> retry
+        const notifyStart = process.hrtime();
+        try {
+          await this.coreApi.updateVideoStatus(videoId, {
+            status: 'ERROR',
+            errorCode: err.code,
+            errorReason: err.message,
+          }); // if THIS fails (infra) it rethrows -> retry
+          this.recordStepDuration(notifyStart, 'notify_core_error', 'success');
+        } catch (notifyErr) {
+          this.recordStepDuration(notifyStart, 'notify_core_error', 'failed');
+          throw notifyErr;
+        }
+
+        this.recordStepDuration(totalStart, 'total', 'business_error');
+        this.totalCounter.inc({ status: 'business_error' });
         return;
       }
       // INFRA error: rethrow so caller does NOT delete the message (SQS will retry / DLQ).
@@ -89,9 +157,27 @@ export class ProcessVideoUseCase {
         err,
         { videoId },
       );
+      this.recordStepDuration(totalStart, 'total', 'infra_error');
+      this.totalCounter.inc({ status: 'infra_error' });
       throw err;
     } finally {
       await this.tempWorkspace.cleanup(ws); // F: cleanup ALWAYS
     }
+  }
+
+  private recordStepDuration(
+    start: [number, number],
+    step: string,
+    status: string,
+  ): void {
+    const diff = process.hrtime(start);
+    const durationInSeconds = diff[0] + diff[1] / 1e9;
+    this.durationHistogram.observe(
+      {
+        step,
+        status,
+      },
+      durationInSeconds,
+    );
   }
 }

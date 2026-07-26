@@ -34,4 +34,15 @@ describe('HealthController (e2e)', () => {
         expect(body.timestamp).toBeDefined();
       });
   });
+
+  it('/metrics (GET)', () => {
+    return request(app.getHttpServer())
+      .get('/metrics')
+      .expect(200)
+      .expect((res) => {
+        expect(res.text).toContain('process_cpu_user_seconds_total');
+        expect(res.text).toContain('video_processing_total');
+        expect(res.text).toContain('video_processing_duration_seconds');
+      });
+  });
 });
