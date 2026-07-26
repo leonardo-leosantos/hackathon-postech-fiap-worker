@@ -13,6 +13,7 @@ import { TEMP_WORKSPACE } from 'src/modules/video-processing/domain/ports/temp-w
 import type { TempWorkspacePort } from 'src/modules/video-processing/domain/ports/temp-workspace.port';
 import { VIDEO_STORAGE } from 'src/modules/video-processing/domain/ports/video-storage.port';
 import type { VideoStoragePort } from 'src/modules/video-processing/domain/ports/video-storage.port';
+import { buildZipStorageKey } from 'src/modules/video-processing/domain/value-objects/zip-storage-key';
 
 /**
  * Orquestra o pipeline de processamento de vídeo:
@@ -37,10 +38,16 @@ export class ProcessVideoUseCase {
    * Contrato de delete-vs-retry para o consumer do SQS:
    * - `execute()` RESOLVE (não lança) => a mensagem DEVE ser apagada do SQS.
    *   Cobre tanto o caminho de sucesso (`DONE`) quanto o erro de NEGÓCIO
-   *   (`MediaProcessingException`): vídeo corrompido/não suportado nunca será
-   *   processado com sucesso, então marcamos `ERROR` na Core e finalizamos.
+   *   (`MediaProcessingException`): nenhuma nova tentativa mudaria o resultado,
+   *   então marcamos `ERROR` na Core (com o `errorCode` que o core usa para
+   *   escolher a mensagem do email) e finalizamos. Além de vídeo corrompido/não
+   *   suportado, isso inclui `SOURCE_NOT_FOUND` — objeto ausente no S3 é
+   *   permanente, não faz sentido gastar retries.
    * - `execute()` LANÇA (rethrow de erro de INFRA, ex. `ExternalServiceException`)
-   *   => a mensagem NÃO deve ser apagada; o SQS reentrega/encaminha para DLQ.
+   *   => a mensagem NÃO deve ser apagada; o SQS reentrega/encaminha para DLQ, e
+   *   o core atribui `INTERNAL_ERROR` a partir da DLQ. Isso inclui as falhas do
+   *   ffmpeg que são NOSSAS (binário ausente, disco cheio) — elas nunca dizem ao
+   *   usuário que o arquivo dele é o problema.
    *
    * O cleanup do workspace temporário roda SEMPRE (finally).
    */
@@ -49,10 +56,10 @@ export class ProcessVideoUseCase {
     this.logger.log('Starting video processing job', { videoId, userId });
     const ws = await this.tempWorkspace.create(videoId);
     try {
-      await this.storage.download(s3VideoKey, ws.videoPath); // A (infra error propagates)
+      await this.storage.download(s3VideoKey, ws.videoPath); // A (infra propagates; SOURCE_NOT_FOUND = business)
       await this.frameExtractor.extractFrames(ws.videoPath, ws.framesDir); // B (MediaProcessingException = business)
       await this.archiver.archiveDirectory(ws.framesDir, ws.zipPath); // C
-      const zipKey = `zips/${userId}/${videoId}.zip`;
+      const zipKey = buildZipStorageKey(userId, videoId);
       await this.storage.upload(ws.zipPath, zipKey); // D (infra)
       await this.coreApi.updateVideoStatus(videoId, {
         status: 'DONE',
@@ -65,9 +72,15 @@ export class ProcessVideoUseCase {
         this.logger.error(
           'Media processing failed (business error) — notifying Core ERROR',
           err,
-          { videoId },
+          { videoId, errorCode: err.code },
         );
-        await this.coreApi.updateVideoStatus(videoId, { status: 'ERROR' }); // if THIS fails (infra) it rethrows -> retry
+        // `errorCode` diz ao core qual mensagem de email enviar; `errorReason` é
+        // só detalhe técnico (log/auditoria), nunca é mostrado ao usuário.
+        await this.coreApi.updateVideoStatus(videoId, {
+          status: 'ERROR',
+          errorCode: err.code,
+          errorReason: err.message,
+        }); // if THIS fails (infra) it rethrows -> retry
         return;
       }
       // INFRA error: rethrow so caller does NOT delete the message (SQS will retry / DLQ).
