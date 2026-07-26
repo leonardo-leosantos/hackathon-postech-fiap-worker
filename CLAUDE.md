@@ -23,7 +23,7 @@ npm run test:watch
 npm run test:cov
 npm run test:e2e             # jest with test/jest-e2e.json
 
-docker compose up app datadog-agent   # worker + datadog agent
+docker compose up app   # worker
 ```
 
 Env vars are validated with zod at boot (fail-fast). Copy `.env.example` to `.env`.

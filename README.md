@@ -86,7 +86,6 @@ Copie `.env.example` para `.env` e preencha:
 | `S3_BUCKET_NAME` | Bucket S3 (origem dos vídeos e destino dos zips) |
 | `API_URL` | Base URL da Core API |
 | `INTERNAL_API_TOKEN` | Token enviado no header `x-internal-token` às rotas `internal/*` da Core API. Deve ser idêntico ao do core. |
-| `DD_API_KEY` | API key do Datadog (usada pelo docker-compose) |
 
 As variáveis são validadas no boot (fail-fast) via `zod`.
 
@@ -96,7 +95,7 @@ Para o ciclo completo local (upload → fila → processamento → zip no S3 →
 status), o worker aponta para a infra LocalStack provisionada pelo projeto
 `hackathon-postech-fiap-core` via rede Docker externa compartilhada. Suba o compose do
 **core primeiro** (`postgres`, `redis`, `localstack`, `app`) e depois o worker
-(`docker compose up app datadog-agent`). Detalhes e roteiro de validação ponta a ponta
+(`docker compose up app`). Detalhes e roteiro de validação ponta a ponta
 em [`prompts/integracao-localstack-core.md`](prompts/integracao-localstack-core.md).
 
 ### Como rodar
@@ -108,8 +107,8 @@ $ npm run start:dev
 # produção (build + node)
 $ npm run build && npm run start:prod
 
-# docker (worker + datadog-agent)
-$ docker compose up app datadog-agent
+# docker (worker)
+$ docker compose up app
 ```
 
 > A imagem Docker de produção instala o `ffmpeg` (dependência de runtime da

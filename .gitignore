@@ -37,6 +37,8 @@ lerna-debug.log*
 
 # IA - Dev Code
 /prompts
+.claude/*
+
 
 # dotenv environment variable files
 .env
