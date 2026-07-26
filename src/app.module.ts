@@ -5,7 +5,12 @@ import { MetricsModule } from 'src/infra/http/modules/metrics/metrics.module';
 import { VideoProcessingModule } from 'src/modules/video-processing/video-processing.module';
 
 @Module({
-  imports: [AppConfigModule, HealthModule, MetricsModule, VideoProcessingModule],
+  imports: [
+    AppConfigModule,
+    HealthModule,
+    MetricsModule,
+    VideoProcessingModule,
+  ],
   controllers: [],
   providers: [],
 })

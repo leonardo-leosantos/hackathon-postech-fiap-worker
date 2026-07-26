@@ -5,7 +5,8 @@ import {
   PrometheusModule,
 } from '@willsoto/nestjs-prometheus';
 
-export const METRIC_VIDEO_PROCESSING_DURATION = 'video_processing_duration_seconds';
+export const METRIC_VIDEO_PROCESSING_DURATION =
+  'video_processing_duration_seconds';
 export const METRIC_VIDEO_PROCESSING_TOTAL = 'video_processing_total';
 
 const videoProcessingDurationProvider = makeHistogramProvider({
@@ -31,10 +32,7 @@ const videoProcessingTotalProvider = makeCounterProvider({
       },
     }),
   ],
-  providers: [
-    videoProcessingDurationProvider,
-    videoProcessingTotalProvider,
-  ],
+  providers: [videoProcessingDurationProvider, videoProcessingTotalProvider],
   exports: [
     PrometheusModule,
     videoProcessingDurationProvider,

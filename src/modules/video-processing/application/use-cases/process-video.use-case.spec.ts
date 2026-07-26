@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/unbound-method -- asserting on jest mock method references is safe; they are never invoked with a rebound `this`. */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { ProcessVideoUseCase } from './process-video.use-case';
 import { ProcessVideoCommand } from 'src/modules/video-processing/application/dtos/process-video.command';
 import { MediaProcessingException } from 'src/modules/video-processing/domain/exceptions/media-processing.exception';
