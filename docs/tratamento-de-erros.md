@@ -115,7 +115,5 @@ Este documento cobre só a parte do worker. A arquitetura inteira — as 12 falh
 linhas de defesa (deduplicação no Redis, guarda anti-falso-positivo, reaper) e o texto exato de cada
 email — está documentada no repositório do core:
 
-> 📖 **Documentação completa:** `<COLE AQUI O LINK DO GITHUB>`
+> 📖 **Documentação completa:** `https://github.com/leonardo-leosantos/hackathon-postech-fiap-core/blob/feat/docs/docs/tratamento-de-erros-e-notificacao.md`
 >
-> <sub>Sugestão de URL, confirme a branch antes de colar:</sub>
-> <sub>`https://github.com/leonardo-leosantos/hackathon-postech-fiap-core/blob/master/docs/tratamento-de-erros-e-notificacao.md`</sub>
