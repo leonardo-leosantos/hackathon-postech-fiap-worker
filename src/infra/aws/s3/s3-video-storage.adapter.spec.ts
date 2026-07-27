@@ -12,6 +12,7 @@ const configProps = {
   awsRegion: 'us-east-1',
   awsAccessKeyId: 'test',
   awsSecretAccessKey: 'test',
+  awsSessionToken: undefined,
   s3BucketName: 'hackathon-videos',
   awsEndpoint: undefined,
 };
@@ -42,6 +43,37 @@ describe('S3VideoStorageAdapter — constructor (LocalStack endpoint)', () => {
 
     expect(adapter['client'].config.endpoint).toBeUndefined();
     expect(adapter['client'].config.forcePathStyle).toBe(false);
+  });
+});
+
+describe('S3VideoStorageAdapter — constructor (credenciais STS)', () => {
+  it('repassa sessionToken ao client quando awsSessionToken está presente', async () => {
+    const adapter = new S3VideoStorageAdapter({
+      ...configProps,
+      awsSessionToken: 'academy-session-token',
+    } as unknown as AppConfigService);
+
+    await expect(adapter['client'].config.credentials()).resolves.toMatchObject(
+      {
+        accessKeyId: 'test',
+        secretAccessKey: 'test',
+        sessionToken: 'academy-session-token',
+      },
+    );
+  });
+
+  it('omite sessionToken quando awsSessionToken está ausente (LocalStack/credencial fixa)', async () => {
+    const adapter = new S3VideoStorageAdapter(
+      configProps as unknown as AppConfigService,
+    );
+
+    const credentials = await adapter['client'].config.credentials();
+
+    expect(credentials).toMatchObject({
+      accessKeyId: 'test',
+      secretAccessKey: 'test',
+    });
+    expect(credentials.sessionToken).toBeUndefined();
   });
 });
 

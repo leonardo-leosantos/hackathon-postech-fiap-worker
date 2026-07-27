@@ -1,0 +1,265 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  DOCKER_IMAGE: leonardosant/hackathon-worker
+  PROJECT_NAME: hackathon
+
+jobs:
+  # ============================================
+  # Job 1: Test (CI)
+  # ============================================
+  # Sem service containers: o worker não tem banco nem Redis.
+  test:
+    name: 🧪 Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🛎️ Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      # O script `lint` do package.json usa --fix (muta arquivos); no CI
+      # queremos apenas verificar.
+      - name: 🔍 Lint
+        run: npx eslint "{src,apps,libs,test}/**/*.ts"
+
+      - name: 🧪 Run Unit Tests (coverage gate 80%)
+        run: npm run test:cov
+
+      # O AppModule valida env com zod no boot (fail-fast), por isso todas as
+      # obrigatórias precisam existir. O e2e faz override do consumer SQS e não
+      # toca a rede — não precisa de LocalStack.
+      - name: 🔄 Run E2E Tests
+        run: npm run test:e2e
+        env:
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          SQS_QUEUE_URL: https://sqs.us-east-1.amazonaws.com/000000000000/dummy
+          S3_BUCKET_NAME: dummy
+          API_URL: http://localhost:3000
+          INTERNAL_API_TOKEN: dummy
+
+  # ============================================
+  # Job 2: Build and Push (Docker)
+  # ============================================
+  build:
+    name: 🐳 Build & Push
+    runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: 🛎️ Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 📋 Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=sha,prefix=,format=long
+            type=raw,value=latest
+
+      # target: production — estágio que instala o ffmpeg (dependência de runtime).
+      - name: 🏗️ Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: production
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================
+  # Job 3: Deploy (Kubernetes / EKS)
+  # ============================================
+  deploy:
+    name: 🚀 Deploy
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: 🛎️ Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔐 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 🔧 Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: 🪪 Verify AWS identity
+        run: |
+          set -euo pipefail
+          echo "Validando credenciais AWS..."
+          aws sts get-caller-identity
+          echo "Credenciais AWS OK ✅"
+
+      - name: 📡 Get infrastructure outputs from SSM
+        run: |
+          set -euo pipefail
+          REGION="${{ env.AWS_REGION }}"
+          PN="${{ env.PROJECT_NAME }}"
+
+          get_ssm() {
+            local NAME="$1"
+            local VALUE
+            VALUE=$(aws ssm get-parameter \
+              --name "$NAME" \
+              --region "$REGION" \
+              --query "Parameter.Value" --output text 2>/dev/null || true)
+            if [ -z "$VALUE" ] || [ "$VALUE" = "None" ]; then
+              echo "❌ Parâmetro SSM ausente ou vazio: $NAME" >&2
+              return 1
+            fi
+            echo "$VALUE"
+          }
+
+          EKS_CLUSTER=$(get_ssm "/${PN}/eks/cluster-name")
+          SQS_QUEUE_URL=$(get_ssm "/${PN}/sqs/video-processing/url")
+          S3_BUCKET_NAME=$(get_ssm "/${PN}/s3/videos-bucket/name")
+
+          echo "EKS_CLUSTER_NAME=$EKS_CLUSTER" >> "$GITHUB_ENV"
+          echo "SQS_QUEUE_URL=$SQS_QUEUE_URL" >> "$GITHUB_ENV"
+          echo "S3_BUCKET_NAME=$S3_BUCKET_NAME" >> "$GITHUB_ENV"
+
+          echo "✅ Valores recuperados do SSM:"
+          echo "  EKS_CLUSTER_NAME = $EKS_CLUSTER"
+          echo "  SQS_QUEUE_URL    = $SQS_QUEUE_URL"
+          echo "  S3_BUCKET_NAME   = $S3_BUCKET_NAME"
+
+      - name: 🔗 Configure kubeconfig
+        run: |
+          set -euo pipefail
+          if [ -z "${EKS_CLUSTER_NAME:-}" ]; then
+            echo "❌ EKS_CLUSTER_NAME está vazio. Step anterior (SSM) provavelmente falhou." >&2
+            exit 1
+          fi
+          echo "Atualizando kubeconfig para o cluster: $EKS_CLUSTER_NAME"
+          aws eks update-kubeconfig \
+            --region "${{ env.AWS_REGION }}" \
+            --name "$EKS_CLUSTER_NAME"
+          echo "Validando acesso ao cluster..."
+          kubectl cluster-info
+          kubectl get nodes -o wide
+          echo "✅ Conectado ao cluster EKS"
+
+      # Namespace é aplicado aqui também (idempotente): remove a dependência de
+      # ordem com o deploy do core, que aplica o mesmo Namespace.
+      - name: 📦 Apply Kubernetes Namespace and ConfigMap
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl create configmap worker-app-config \
+            --namespace=hackathon \
+            --from-literal=NODE_ENV=production \
+            --from-literal=PORT=3001 \
+            --from-literal=AWS_REGION="${{ env.AWS_REGION }}" \
+            --from-literal=SQS_QUEUE_URL="${{ env.SQS_QUEUE_URL }}" \
+            --from-literal=S3_BUCKET_NAME="${{ env.S3_BUCKET_NAME }}" \
+            --from-literal=API_URL=http://hackathon-core-service.hackathon.svc.cluster.local \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # D7: o pod usa as MESMAS credenciais Academy do pipeline (expiram em ~4h).
+      # INTERNAL_API_TOKEN deve ter o MESMO valor do secret homônimo no repo do core.
+      - name: 🔐 Create/Update Kubernetes Secrets
+        run: |
+          kubectl create secret generic worker-app-secrets \
+            --namespace=hackathon \
+            --from-literal=INTERNAL_API_TOKEN="${{ secrets.K8S_INTERNAL_API_TOKEN }}" \
+            --from-literal=AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            --from-literal=AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            --from-literal=AWS_SESSION_TOKEN="${{ secrets.AWS_SESSION_TOKEN }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: 📦 Apply Application manifests
+        run: |
+          kubectl apply -f k8s/app/
+
+      - name: 🔄 Update deployment image
+        run: |
+          kubectl set image deployment/hackathon-worker \
+            worker=${{ env.DOCKER_IMAGE }}:${{ github.sha }} \
+            -n hackathon
+
+      # Obrigatório: quando o deploy é re-rodado só para renovar as credenciais
+      # Academy (mesma imagem/sha), o `set image` acima é no-op e os pods não
+      # recarregariam o Secret. Com imagem nova isso gera um 2º rollout — aceito.
+      - name: ♻️ Restart deployment (recarrega Secret com credenciais novas)
+        run: |
+          kubectl rollout restart deployment/hackathon-worker -n hackathon
+
+      - name: ✅ Verify deployment
+        run: |
+          kubectl rollout status deployment/hackathon-worker -n hackathon --timeout=300s
+
+      - name: 🔍 Debug - Pod Status (runs on failure)
+        if: failure()
+        run: |
+          set +e
+          echo "=== KUBECONFIG CHECK ==="
+          if ! kubectl cluster-info >/dev/null 2>&1; then
+            echo "⚠️  kubectl não está configurado. Tentando reconfigurar..."
+            if [ -n "${EKS_CLUSTER_NAME:-}" ]; then
+              aws eks update-kubeconfig \
+                --region "${{ env.AWS_REGION }}" \
+                --name "$EKS_CLUSTER_NAME" || true
+            else
+              echo "❌ EKS_CLUSTER_NAME não definido — o step de SSM provavelmente falhou."
+              echo "Verifique o step '📡 Get infrastructure outputs from SSM' acima."
+            fi
+          fi
+
+          echo ""
+          echo "=== POD STATUS ==="
+          kubectl get pods -n hackathon -o wide || true
+          echo ""
+          echo "=== POD DESCRIPTIONS ==="
+          kubectl describe pods -n hackathon -l app=hackathon-worker || true
+          echo ""
+          echo "=== POD LOGS (current) ==="
+          kubectl logs -n hackathon -l app=hackathon-worker --tail=100 --all-containers=true || true
+          echo ""
+          echo "=== POD LOGS (previous crash) ==="
+          kubectl logs -n hackathon -l app=hackathon-worker --tail=100 --all-containers=true --previous || true
+          echo ""
+          echo "=== EVENTS ==="
+          kubectl get events -n hackathon --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+          echo ""
+          echo "=== DEPLOYMENT STATUS ==="
+          kubectl get deployment hackathon-worker -n hackathon -o yaml || true

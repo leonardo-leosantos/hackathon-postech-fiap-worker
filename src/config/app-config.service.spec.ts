@@ -7,6 +7,7 @@ describe('AppConfigService', () => {
     AWS_REGION: 'us-east-1',
     AWS_ACCESS_KEY_ID: 'test',
     AWS_SECRET_ACCESS_KEY: 'test',
+    AWS_SESSION_TOKEN: 'academy-session-token',
     SQS_QUEUE_URL: 'http://localhost:4566/000000000000/video-processing',
     S3_BUCKET_NAME: 'hackathon-videos',
     API_URL: 'http://localhost:3000',
@@ -46,5 +47,16 @@ describe('AppConfigService', () => {
     delete withoutEndpoint.AWS_ENDPOINT;
 
     expect(build(withoutEndpoint).awsEndpoint).toBeUndefined();
+  });
+
+  it('awsSessionToken presente: credencial temporária (STS/Academy)', () => {
+    expect(build(env).awsSessionToken).toBe('academy-session-token');
+  });
+
+  it('awsSessionToken ausente: undefined (credencial fixa/LocalStack)', () => {
+    const withoutSessionToken: Partial<EnvVars> = { ...env };
+    delete withoutSessionToken.AWS_SESSION_TOKEN;
+
+    expect(build(withoutSessionToken).awsSessionToken).toBeUndefined();
   });
 });

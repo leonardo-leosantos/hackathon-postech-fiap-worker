@@ -1,0 +1,140 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hackathon-worker
+  namespace: hackathon
+  labels:
+    app: hackathon-worker
+    app.kubernetes.io/name: hackathon-worker
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  # Aumenta o tempo máximo para o deployment ser considerado falho
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Sobe o pod novo antes de derrubar o antigo (que ainda pode estar
+      # terminando um vídeo dentro do grace period).
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: hackathon-worker
+  template:
+    metadata:
+      labels:
+        app: hackathon-worker
+        app.kubernetes.io/name: hackathon-worker
+        app.kubernetes.io/component: worker
+    spec:
+      # O shutdown gracioso termina o vídeo em processamento. O visibility
+      # timeout da fila é 300s: um SIGKILL no meio do job queimaria 1 das 3
+      # tentativas da mensagem sem nenhum progresso.
+      terminationGracePeriodSeconds: 300
+      containers:
+        # O nome `worker` importa: o `kubectl set image` do pipeline usa `worker=...`.
+        - name: worker
+          # Usando imagem do DockerHub
+          image: leonardosant/hackathon-worker:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3001
+              name: http
+          env:
+            # Variáveis do ConfigMap (criado pelo pipeline)
+            - name: NODE_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: worker-app-config
+                  key: NODE_ENV
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: worker-app-config
+                  key: PORT
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: worker-app-config
+                  key: AWS_REGION
+            - name: SQS_QUEUE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: worker-app-config
+                  key: SQS_QUEUE_URL
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: worker-app-config
+                  key: S3_BUCKET_NAME
+            - name: API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: worker-app-config
+                  key: API_URL
+            # Variáveis do Secret (criado pelo pipeline).
+            # AWS_*: credenciais Academy explícitas (D7) — expiram em ~4h.
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: worker-app-secrets
+                  key: INTERNAL_API_TOKEN
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: worker-app-secrets
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: worker-app-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_SESSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: worker-app-secrets
+                  key: AWS_SESSION_TOKEN
+          volumeMounts:
+            # Os paths de trabalho são fixos (/tmp/videos, /tmp/frames, /tmp/zips)
+            # e o container roda como uid 1001 — precisa de um /tmp gravável.
+            - name: tmp
+              mountPath: /tmp
+          # ffmpeg é CPU-bound e os frames a 1fps de um vídeo longo passam de 1GB.
+          # Valores iniciais, sem medição real.
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+              ephemeral-storage: "2Gi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+              ephemeral-storage: "5Gi"
+          # Endpoints estáticos: comprovam que o processo está vivo, NÃO que o
+          # consumer está conseguindo falar com o SQS.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            periodSeconds: 5
+            timeoutSeconds: 5
+            # 12 tentativas * 5s = 60s para iniciar
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 3001
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}

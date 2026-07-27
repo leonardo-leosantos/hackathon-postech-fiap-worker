@@ -23,6 +23,10 @@ export class AppConfigService {
     return this.configService.get('AWS_SECRET_ACCESS_KEY', { infer: true });
   }
 
+  get awsSessionToken(): string | undefined {
+    return this.configService.get('AWS_SESSION_TOKEN', { infer: true });
+  }
+
   get sqsQueueUrl(): string {
     return this.configService.get('SQS_QUEUE_URL', { infer: true });
   }

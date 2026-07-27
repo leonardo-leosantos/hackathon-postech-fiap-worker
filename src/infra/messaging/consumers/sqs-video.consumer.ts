@@ -55,6 +55,11 @@ export class SqsVideoConsumer
       credentials: {
         accessKeyId: this.config.awsAccessKeyId,
         secretAccessKey: this.config.awsSecretAccessKey,
+        // Credenciais temporárias (STS/Academy) só são aceitas com o token de
+        // sessão; sem ele o comportamento permanece o de credenciais fixas.
+        ...(this.config.awsSessionToken
+          ? { sessionToken: this.config.awsSessionToken }
+          : {}),
       },
       // LocalStack: honra endpoint customizado quando fornecido.
       ...(this.config.awsEndpoint ? { endpoint: this.config.awsEndpoint } : {}),
