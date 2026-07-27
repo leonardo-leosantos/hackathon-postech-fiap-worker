@@ -224,9 +224,12 @@ jobs:
         run: |
           kubectl rollout restart deployment/hackathon-worker -n hackathon
 
+      # Timeout MAIOR que o terminationGracePeriodSeconds (300s) do pod: o pod antigo
+      # pode levar o grace inteiro para morrer (SIGKILL só ao final), e com timeout
+      # igual ao grace o verify perde a corrida mesmo com o pod novo saudável.
       - name: ✅ Verify deployment
         run: |
-          kubectl rollout status deployment/hackathon-worker -n hackathon --timeout=300s
+          kubectl rollout status deployment/hackathon-worker -n hackathon --timeout=600s
 
       - name: 🔍 Debug - Pod Status (runs on failure)
         if: failure()
