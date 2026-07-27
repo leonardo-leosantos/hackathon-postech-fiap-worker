@@ -22,6 +22,7 @@ const configProps = {
   awsRegion: 'us-east-1',
   awsAccessKeyId: 'test',
   awsSecretAccessKey: 'test',
+  awsSessionToken: undefined,
   awsEndpoint: undefined,
 };
 
@@ -205,6 +206,38 @@ describe('SqsVideoConsumer', () => {
     it('usa o endpoint padrão da AWS quando awsEndpoint está ausente', () => {
       // `consumer` do beforeEach já é construído com awsEndpoint: undefined.
       expect(consumer['client'].config.endpoint).toBeUndefined();
+    });
+  });
+
+  describe('constructor — credenciais STS (AWS_SESSION_TOKEN)', () => {
+    it('repassa sessionToken ao client quando awsSessionToken está presente', async () => {
+      const withSessionToken = new SqsVideoConsumer(
+        useCase as unknown as ProcessVideoUseCase,
+        {
+          ...configProps,
+          awsSessionToken: 'academy-session-token',
+        } as unknown as AppConfigService,
+        logger,
+      );
+
+      await expect(
+        withSessionToken['client'].config.credentials(),
+      ).resolves.toMatchObject({
+        accessKeyId: 'test',
+        secretAccessKey: 'test',
+        sessionToken: 'academy-session-token',
+      });
+    });
+
+    it('omite sessionToken quando awsSessionToken está ausente (LocalStack/credencial fixa)', async () => {
+      // `consumer` do beforeEach já é construído com awsSessionToken: undefined.
+      const credentials = await consumer['client'].config.credentials();
+
+      expect(credentials).toMatchObject({
+        accessKeyId: 'test',
+        secretAccessKey: 'test',
+      });
+      expect(credentials.sessionToken).toBeUndefined();
     });
   });
 

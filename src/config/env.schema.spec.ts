@@ -30,6 +30,21 @@ describe('validateEnv', () => {
     expect(validateEnv({ ...validEnv, PORT: '4001' }).PORT).toBe(4001);
   });
 
+  it('AWS_SESSION_TOKEN é opcional: aceito quando presente, ausente sem quebrar o boot', () => {
+    expect(
+      validateEnv({ ...validEnv, AWS_SESSION_TOKEN: 'academy-session-token' })
+        .AWS_SESSION_TOKEN,
+    ).toBe('academy-session-token');
+    // Credenciais fixas (LocalStack) não têm token de sessão.
+    expect(validateEnv(validEnv).AWS_SESSION_TOKEN).toBeUndefined();
+  });
+
+  it('AWS_SESSION_TOKEN vazio é rejeitado (evita mandar token em branco ao STS)', () => {
+    expect(() => validateEnv({ ...validEnv, AWS_SESSION_TOKEN: '' })).toThrow(
+      /Invalid environment variables:[\s\S]*AWS_SESSION_TOKEN/,
+    );
+  });
+
   it('variável obrigatória ausente: lança listando o nome da variável (fail-fast do boot)', () => {
     const incomplete: Record<string, unknown> = { ...validEnv };
     delete incomplete.INTERNAL_API_TOKEN;

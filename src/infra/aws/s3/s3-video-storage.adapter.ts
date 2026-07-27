@@ -37,6 +37,11 @@ export class S3VideoStorageAdapter implements VideoStoragePort {
       credentials: {
         accessKeyId: this.config.awsAccessKeyId,
         secretAccessKey: this.config.awsSecretAccessKey,
+        // Credenciais temporárias (STS/Academy) só são aceitas com o token de
+        // sessão; sem ele o comportamento permanece o de credenciais fixas.
+        ...(this.config.awsSessionToken
+          ? { sessionToken: this.config.awsSessionToken }
+          : {}),
       },
       // LocalStack: honra endpoint customizado. forcePathStyle evita que o SDK
       // tente resolver `<bucket>.<host>` (subdomínio) — necessário fora da AWS real.

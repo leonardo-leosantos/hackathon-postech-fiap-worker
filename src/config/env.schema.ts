@@ -9,6 +9,9 @@ export const envSchema = z.object({
   AWS_REGION: z.string().min(1, 'AWS_REGION is required'),
   AWS_ACCESS_KEY_ID: z.string().min(1, 'AWS_ACCESS_KEY_ID is required'),
   AWS_SECRET_ACCESS_KEY: z.string().min(1, 'AWS_SECRET_ACCESS_KEY is required'),
+  // Token de sessão STS. Obrigatório apenas com credenciais temporárias
+  // (ex.: AWS Academy); ausente com credenciais permanentes e no LocalStack.
+  AWS_SESSION_TOKEN: z.string().min(1).optional(),
   SQS_QUEUE_URL: z.string().url('SQS_QUEUE_URL must be a valid URL'),
   S3_BUCKET_NAME: z.string().min(1, 'S3_BUCKET_NAME is required'),
   API_URL: z.string().url('API_URL must be a valid URL'),
