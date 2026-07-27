@@ -75,10 +75,14 @@ export class SqsVideoConsumer
     this.pollingLoop = this.poll();
   }
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
     // Sinaliza o loop para encerrar de forma graciosa após a iteração atual.
     this.running = false;
     this.logger.log('SQS video consumer stopping — draining current iteration');
+    // Aguarda o drain: app.close() só resolve quando a iteração corrente
+    // (inclusive um vídeo em processamento) tiver terminado — é isso que
+    // permite ao main.ts dar process.exit com segurança logo em seguida.
+    await this.pollingLoop;
   }
 
   private async poll(): Promise<void> {

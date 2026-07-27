@@ -258,7 +258,7 @@ describe('SqsVideoConsumer', () => {
           };
         }
         // 2ª chamada: encerra o loop de forma graciosa e devolve vazio.
-        consumer.onModuleDestroy();
+        void consumer.onModuleDestroy();
         return { Messages: [] };
       });
 
@@ -286,7 +286,7 @@ describe('SqsVideoConsumer', () => {
         if (receiveCount === 1) {
           return {}; // sem a propriedade Messages — cai no ?? []
         }
-        consumer.onModuleDestroy();
+        void consumer.onModuleDestroy();
         return { Messages: [] };
       });
 
@@ -315,7 +315,7 @@ describe('SqsVideoConsumer', () => {
             throw new Error('receive failed');
           }
           // 2ª chamada: encerra o loop e devolve vazio.
-          consumer.onModuleDestroy();
+          void consumer.onModuleDestroy();
           return { Messages: [] };
         });
 
